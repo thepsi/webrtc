@@ -144,6 +144,10 @@ Check out the **[contributing wiki](https://github.com/pion/webrtc/wiki/Contribu
 * [Quentin Renard](https://github.com/asticode)
 * [opennota](https://github.com/opennota)
 * [Simon Eisenmann](https://github.com/longsleep)
+* [Ben Weitzman](https://github.com/benweitzman)
+* [Masahiro Nakamura](https://github.com/tsuu32)
+* [Tarrence van As](https://github.com/tarrencev)
+* [Yuki Igarashi](https://github.com/bonprosoft)
 
 ### License
 MIT License - see [LICENSE](LICENSE) for full text

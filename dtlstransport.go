@@ -156,6 +156,18 @@ func (t *DTLSTransport) startSRTP() error {
 		Profile:       srtp.ProtectionProfileAes128CmHmacSha1_80,
 		LoggerFactory: t.api.settingEngine.LoggerFactory,
 	}
+	if t.api.settingEngine.replayProtection.SRTP != nil {
+		srtpConfig.RemoteOptions = append(
+			srtpConfig.RemoteOptions,
+			srtp.SRTPReplayProtection(*t.api.settingEngine.replayProtection.SRTP),
+		)
+	}
+	if t.api.settingEngine.replayProtection.SRTCP != nil {
+		srtpConfig.RemoteOptions = append(
+			srtpConfig.RemoteOptions,
+			srtp.SRTCPReplayProtection(*t.api.settingEngine.replayProtection.SRTCP),
+		)
+	}
 
 	err := srtpConfig.ExtractSessionKeysFromDTLS(t.conn, t.role() == DTLSRoleClient)
 	if err != nil {
@@ -275,6 +287,10 @@ func (t *DTLSTransport) Start(remoteParameters DTLSParameters) error {
 		return err
 	}
 
+	if t.api.settingEngine.replayProtection.DTLS != nil {
+		dtlsConfig.ReplayProtectionWindow = int(*t.api.settingEngine.replayProtection.DTLS)
+	}
+
 	// Connect as DTLS Client/Server, function is blocking and we
 	// must not hold the DTLSTransport lock
 	if role == DTLSRoleClient {
@@ -341,7 +357,8 @@ func (t *DTLSTransport) Stop() error {
 	}
 
 	if t.conn != nil {
-		if err := t.conn.Close(); err != nil {
+		// dtls connection may be closed on sctp close.
+		if err := t.conn.Close(); err != nil && err != dtls.ErrConnClosed {
 			closeErrs = append(closeErrs, err)
 		}
 	}

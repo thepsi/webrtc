@@ -475,16 +475,16 @@ func TestOneAttrKeyConnectionSetupPerMediaDescriptionInSDP(t *testing.T) {
 	pc, err := NewPeerConnection(Configuration{})
 	assert.NoError(t, err)
 
-	_, err = pc.AddTransceiver(RTPCodecTypeVideo)
+	_, err = pc.AddTransceiverFromKind(RTPCodecTypeVideo)
 	assert.NoError(t, err)
 
-	_, err = pc.AddTransceiver(RTPCodecTypeAudio)
+	_, err = pc.AddTransceiverFromKind(RTPCodecTypeAudio)
 	assert.NoError(t, err)
 
-	_, err = pc.AddTransceiver(RTPCodecTypeAudio)
+	_, err = pc.AddTransceiverFromKind(RTPCodecTypeAudio)
 	assert.NoError(t, err)
 
-	_, err = pc.AddTransceiver(RTPCodecTypeVideo)
+	_, err = pc.AddTransceiverFromKind(RTPCodecTypeVideo)
 	assert.NoError(t, err)
 
 	sdp, err := pc.CreateOffer(nil)
@@ -732,14 +732,22 @@ func TestPeerConnectionTrickle(t *testing.T) {
 			return append(candidateCache, c.ToJSON())
 		}
 
-		assert.NoError(t, answerPC.AddICECandidate(c.ToJSON()))
+		assert.NoError(t, pc.AddICECandidate(c.ToJSON()))
 		return candidateCache
 	}
 
 	candidateLock := sync.RWMutex{}
+	var offerCandidateDone, answerCandidateDone bool
 
 	cachedOfferCandidates := []ICECandidateInit{}
 	offerPC.OnICECandidate(func(c *ICECandidate) {
+		if offerCandidateDone {
+			t.Error("Received OnICECandidate after finishing gathering")
+		}
+		if c == nil {
+			offerCandidateDone = true
+		}
+
 		candidateLock.Lock()
 		defer candidateLock.Unlock()
 
@@ -748,6 +756,13 @@ func TestPeerConnectionTrickle(t *testing.T) {
 
 	cachedAnswerCandidates := []ICECandidateInit{}
 	answerPC.OnICECandidate(func(c *ICECandidate) {
+		if answerCandidateDone {
+			t.Error("Received OnICECandidate after finishing gathering")
+		}
+		if c == nil {
+			answerCandidateDone = true
+		}
+
 		candidateLock.Lock()
 		defer candidateLock.Unlock()
 
@@ -793,4 +808,46 @@ func TestPeerConnectionTrickle(t *testing.T) {
 	<-offerPCConnected.Done()
 	assert.NoError(t, offerPC.Close())
 	assert.NoError(t, answerPC.Close())
+}
+
+// Issue #1121, assert populateLocalCandidates doesn't mutate
+func TestPopulateLocalCandidates(t *testing.T) {
+	t.Run("PendingLocalDescription shouldn't add extra mutations", func(t *testing.T) {
+		pc, err := NewPeerConnection(Configuration{})
+		assert.NoError(t, err)
+
+		offer, err := pc.CreateOffer(nil)
+		assert.NoError(t, err)
+
+		assert.NoError(t, pc.SetLocalDescription(offer))
+		assert.Equal(t, pc.PendingLocalDescription(), pc.PendingLocalDescription())
+		assert.NoError(t, pc.Close())
+	})
+
+	t.Run("end-of-candidates only when gathering is complete", func(t *testing.T) {
+		s := SettingEngine{}
+		s.SetTrickle(true)
+
+		pc, err := NewAPI(WithSettingEngine(s)).NewPeerConnection(Configuration{})
+		assert.NoError(t, err)
+
+		gatherComplete, gatherCompleteCancel := context.WithCancel(context.Background())
+		pc.OnICEGatheringStateChange(func(i ICEGathererState) {
+			if i == ICEGathererStateComplete {
+				gatherCompleteCancel()
+			}
+		})
+
+		offer, err := pc.CreateOffer(nil)
+		assert.NoError(t, err)
+		assert.NotContains(t, offer.SDP, "a=candidate")
+		assert.NotContains(t, offer.SDP, "a=end-of-candidates")
+
+		assert.NoError(t, pc.SetLocalDescription(offer))
+		<-gatherComplete.Done()
+		assert.Contains(t, pc.PendingLocalDescription().SDP, "a=candidate")
+		assert.Contains(t, pc.PendingLocalDescription().SDP, "a=end-of-candidates")
+
+		assert.NoError(t, pc.Close())
+	})
 }
